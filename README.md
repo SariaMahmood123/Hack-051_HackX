@@ -1,2 +1,2 @@
 # LUMS-HACKX-Team-A
-This is a private repository for the initial implementation of the Lums hackathon project
+This is a public repository for the initial implementation of the Lums hackathon project
