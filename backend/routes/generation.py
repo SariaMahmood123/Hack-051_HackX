@@ -16,8 +16,8 @@ from ..core.utils import generate_cache_key, ensure_file_exists
 
 # Import AI model wrappers
 from ai.gemini_client import GeminiClient
+from ai.xtts_wrapper import XTTSWrapper
 # TODO: Import these once implemented
-# from ai.xtts_wrapper import XTTSWrapper
 # from ai.sadtalker_wrapper import SadTalkerWrapper
 # from ai.pipeline import PipelineManager
 
@@ -101,6 +101,28 @@ class FullPipelineRequest(BaseModel):
         if not v.strip():
             raise ValueError("Prompt cannot be empty")
         return v.strip()
+
+
+class MKBHDGenerationRequest(BaseModel):
+    """Request for MKBHD-style audio generation"""
+    prompt: str = Field(..., description="Topic for MKBHD-style script", min_length=1, max_length=2000)
+    max_tokens: Optional[int] = Field(default=3000, description="Max script length", ge=100, le=50000)
+    
+    @validator('prompt')
+    def validate_prompt(cls, v):
+        if not v.strip():
+            raise ValueError("Prompt cannot be empty")
+        return v.strip()
+
+
+class MKBHDGenerationResponse(BaseModel):
+    """Response from MKBHD-style generation"""
+    script: str
+    audio_path: str
+    audio_url: str
+    duration: float
+    request_id: str
+    timestamp: str
 
 
 class FullPipelineResponse(BaseModel):
@@ -191,26 +213,32 @@ async def generate_tts(request: TTSRequest):
         # Use reference audio or default
         reference_audio = request.reference_audio or str(settings.XTTS_REFERENCE_AUDIO)
         
-        # TODO: Implement XTTS integration
-        # xtts = XTTSWrapper()
-        # output_path = settings.OUTPUTS_PATH / "audio" / f"{request_id}.wav"
-        # audio_path = await xtts.synthesize_async(
-        #     text=request.text,
-        #     reference_audio=Path(reference_audio),
-        #     output_path=output_path,
-        #     language=request.language
-        # )
+        # Initialize XTTS wrapper (quality-optimized CPU mode)
+        xtts = XTTSWrapper()
+        xtts.load_model()
         
-        # Placeholder response
-        audio_filename = f"{request_id}.wav"
-        audio_path = f"outputs/audio/{audio_filename}"
+        # Generate audio
+        output_path = settings.OUTPUTS_PATH / "audio" / f"{request_id}.wav"
+        audio_path = xtts.synthesize(
+            text=request.text,
+            reference_audio=Path(reference_audio),
+            output_path=output_path,
+            language=request.language,
+            temperature=0.75,  # Emotion-focused
+            top_p=0.9,  # Natural variation
+            repetition_penalty=2.5  # Quality
+        )
         
-        logger.info(f"[{request_id}] TTS generation complete: {audio_path}")
+        # Calculate duration (approximate from file size)
+        file_size = audio_path.stat().st_size
+        audio_duration = (file_size - 44) / 48000  # 24kHz stereo/mono
+        
+        logger.info(f"[{request_id}] TTS generation complete: {audio_path.name}")
         
         return TTSResponse(
-            audio_path=audio_path,
-            audio_url=get_output_url(audio_path),
-            duration=5.0,  # Placeholder
+            audio_path=str(audio_path),
+            audio_url=get_output_url(str(audio_path)),
+            duration=audio_duration,
             request_id=request_id,
             sample_rate=settings.AUDIO_SAMPLE_RATE
         )
@@ -368,3 +396,111 @@ async def generate_full_pipeline(request: FullPipelineRequest, background_tasks:
     except Exception as e:
         logger.error(f"[{request_id}] Unexpected error: {str(e)}", exc_info=True)
         raise GenerationException(f"Full pipeline failed: {str(e)}")
+
+
+@router.post("/generate/mkbhd", response_model=MKBHDGenerationResponse)
+async def generate_mkbhd_audio(request: MKBHDGenerationRequest):
+    """
+    Generate MKBHD-style audio
+    
+    1. Uses Gemini to create a tech review script in MKBHD's style
+    2. Synthesizes it using XTTS with MKBHD's voice reference
+    3. Returns high-quality audio
+    
+    - **prompt**: Topic or product to review (e.g., "the new iPhone 16")
+    - **max_tokens**: Length of generated script
+    """
+    request_id = str(uuid.uuid4())
+    start_time = datetime.utcnow()
+    logger.info(f"[{request_id}] MKBHD generation started: {request.prompt[:50]}...")
+    
+    try:
+        # Step 1: Generate MKBHD-style script with Gemini
+        logger.info(f"[{request_id}] Step 1/2: Generating MKBHD-style script...")
+        client = GeminiClient(api_key=settings.GEMINI_API_KEY, model_name=settings.GEMINI_MODEL)
+        
+        # Create a prompt that guides Gemini to write like MKBHD
+        mkbhd_system_prompt = f"""You are Marques Brownlee (MKBHD) having a personal conversation with someone who asked you: {request.prompt}
+
+You're responding directly to THEIR question in a natural, conversational way - like you're chatting with them one-on-one, not recording a YouTube video for millions.
+
+CRITICAL RULES:
+- Output ONLY spoken words - what you would actually say out loud
+- NO stage directions, NO asterisks, NO descriptions like "(Video opens)" or "*sitting at desk*"
+- NO formatting, NO actions, NO visual cues
+- Just pure dialogue - words that will be spoken
+- Keep it CONCISE - aim for 2-3 minutes of spoken content
+- IMPORTANT: Always complete your final sentence and end with a clear conclusion - never leave thoughts hanging
+
+Your conversational style:
+- Address them directly using "you" and "your" - make it personal to THEIR situation
+- Start casually like "Alright, so..." or "Okay, so here's the thing..." or "Hey, so..."
+- Use phrases like "For you specifically", "In your case", "Given what you told me"
+- Be honest and helpful - focus on what matters to THEM
+- Reference their specific situation if they mentioned details (like current phone, use case, etc.)
+- Give your genuine opinion and recommendation tailored to their needs
+- MUST end with a complete final sentence and practical advice - wrap it up properly
+
+Write a focused, personal response that directly answers their question. Make them feel like you're genuinely helping them make a decision, not performing for a camera. Be concise and conversational. ALWAYS finish your final thought completely and end with a clear recommendation or conclusion. Remember: ONLY words that will be spoken - no video descriptions."""
+
+        script = await client.generate_async(
+            prompt=mkbhd_system_prompt,
+            temperature=0.8,  # More creative for personality
+            max_tokens=request.max_tokens
+        )
+        
+        logger.info(f"[{request_id}] Script generated: {len(script)} chars (max_tokens={request.max_tokens})")
+        logger.info(f"[{request_id}] Script preview: {script[:100]}...")
+        
+        # Step 2: Synthesize with MKBHD voice
+        logger.info(f"[{request_id}] Step 2/2: Synthesizing audio with MKBHD voice...")
+        
+        # Use MKBHD reference audio (located in parent directory's assets folder)
+        mkbhd_reference = Path(__file__).parent.parent.parent / "assets" / "mkbhd.wav"
+        if not mkbhd_reference.exists():
+            raise InvalidInputException(
+                "MKBHD reference audio not found. Please run: "
+                "python extract_reference_audio.py <source> <start> <end> -o mkbhd.wav"
+            )
+        
+        # Initialize XTTS
+        xtts = XTTSWrapper()
+        xtts.load_model()
+        
+        # Generate audio with emotion-focused parameters
+        output_path = settings.OUTPUTS_PATH / "audio" / f"mkbhd_{request_id}.wav"
+        audio_path = xtts.synthesize(
+            text=script,
+            reference_audio=mkbhd_reference,
+            output_path=output_path,
+            language="en",
+            temperature=0.75,  # Expressive
+            top_p=0.9,  # Natural variation
+            repetition_penalty=2.5,  # Quality
+            speed=1.0  # Normal MKBHD pace
+        )
+        
+        # Calculate duration
+        file_size = audio_path.stat().st_size
+        audio_duration = (file_size - 44) / 48000
+        
+        logger.info(f"[{request_id}] MKBHD audio generated: {audio_duration:.1f}s")
+        
+        return MKBHDGenerationResponse(
+            script=script,
+            audio_path=str(audio_path),
+            audio_url=get_output_url(str(audio_path)),
+            duration=audio_duration,
+            request_id=request_id,
+            timestamp=start_time.isoformat()
+        )
+    
+    except ValueError as e:
+        logger.error(f"[{request_id}] Validation error: {str(e)}")
+        raise InvalidInputException(str(e))
+    except RuntimeError as e:
+        logger.error(f"[{request_id}] Generation error: {str(e)}", exc_info=True)
+        raise GenerationException(f"MKBHD generation failed: {str(e)}")
+    except Exception as e:
+        logger.error(f"[{request_id}] Unexpected error: {str(e)}", exc_info=True)
+        raise GenerationException(f"MKBHD generation failed: {str(e)}")

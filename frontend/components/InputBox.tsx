@@ -7,9 +7,10 @@ interface InputBoxProps {
   onSend: (message: string) => void
   disabled: boolean
   isGenerating: boolean
+  placeholder?: string
 }
 
-export default function InputBox({ onSend, disabled, isGenerating }: InputBoxProps) {
+export default function InputBox({ onSend, disabled, isGenerating, placeholder }: InputBoxProps) {
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -79,7 +80,7 @@ export default function InputBox({ onSend, disabled, isGenerating }: InputBoxPro
             placeholder={
               isGenerating 
                 ? "Generating response..." 
-                : "Type your message... (Shift+Enter for newline)"
+                : placeholder || "Type your message... (Shift+Enter for newline)"
             }
             disabled={disabled}
             className={`w-full bg-gray-700 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none transition-smooth min-h-[56px] max-h-[200px] ${

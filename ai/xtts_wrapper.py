@@ -127,8 +127,8 @@ class XTTSWrapper:
         length_penalty: float = 1.0,
         repetition_penalty: float = 2.5,
         top_k: int = 50,
-        top_p: float = 0.85,
-        speed: float = 1.0
+        top_p: float = 0.9,
+        speed: float = 0.95
     ) -> Path:
         """
         Synthesize high-quality speech from text using voice cloning
@@ -210,9 +210,9 @@ class XTTSWrapper:
                 raise RuntimeError(f"Output file was not created: {output_path}")
             
             file_size_kb = output_path.stat().st_size / 1024
-            logger.info(f"[XTTS] ✓ High-quality audio generated: {output_path.name}")
-            logger.info(f"[XTTS] ✓ File size: {file_size_kb:.1f} KB @ 24kHz 16-bit WAV")
-            logger.info(f"[XTTS] ✓ Quality: FP32 precision, deterministic output")
+            logger.info(f"[XTTS] [OK] High-quality audio generated: {output_path.name}")
+            logger.info(f"[XTTS] [OK] File size: {file_size_kb:.1f} KB @ 24kHz 16-bit WAV")
+            logger.info(f"[XTTS] [OK] Quality: FP32 precision, deterministic output")
             
             return output_path
         
