@@ -1,10 +1,11 @@
 """
-Gemini 2.0 Flash Client Wrapper
-Handles text generation via Google Gemini API
+Gemini Client Wrapper
+Handles stateless text generation via Google Gemini API
+Refactored for concurrent backend usage without shared state
 """
 import os
 import logging
-from typing import List, Dict, Optional
+from typing import Optional
 import google.generativeai as genai
 
 logger = logging.getLogger("lumen")
@@ -12,17 +13,21 @@ logger = logging.getLogger("lumen")
 
 class GeminiClient:
     """
-    Wrapper for Gemini 2.0 Flash API
-    Provides conversational text generation with history support
+    Stateless wrapper for Gemini API
+    
+    Key design decisions:
+    - Uses generate_content() instead of chat sessions (stateless, concurrent-safe)
+    - Limits response tokens to keep responses fast and reduce quota usage
+    - No shared state between requests (safe for FastAPI backend)
     """
     
-    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-2.0-flash-exp"):
+    def __init__(self, api_key: Optional[str] = None, model_name: str = "gemini-2.5-flash"):
         """
         Initialize Gemini client
         
         Args:
             api_key: Gemini API key (defaults to GEMINI_API_KEY env var)
-            model_name: Model identifier
+            model_name: Model identifier (e.g., "gemini-2.5-flash")
         """
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
@@ -32,44 +37,51 @@ class GeminiClient:
         if not self.api_key.startswith("AIza") or len(self.api_key) < 35:
             logger.warning("GEMINI_API_KEY has unexpected format. Expected format: AIza... (39 chars)")
         
+        # Configure API
         genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel(model_name)
-        self.chat_session = None
-    
-    def start_chat(self, history: Optional[List[Dict]] = None):
-        """
-        Start a new chat session
         
-        Args:
-            history: Previous conversation history in format:
-                     [{"role": "user", "parts": ["text"]}, {"role": "model", "parts": ["text"]}]
-        """
-        self.chat_session = self.model.start_chat(history=history or [])
+        # Store model name for error messages
+        self.model_name = model_name
+        
+        # Create model instance - SDK handles models/ prefix internally
+        self.model = genai.GenerativeModel(model_name)
+        
+        logger.info(f"[OK] Initialized GeminiClient with model: {model_name}")
     
-    def generate(self, prompt: str, conversation_history: Optional[List[Dict]] = None) -> str:
+    def generate(self, prompt: str, temperature: float = 0.7, max_tokens: int = 150) -> str:
         """
-        Generate text response for a given prompt
+        Generate text response for a given prompt (stateless)
+        
+        This method is stateless and safe for concurrent backend requests.
+        Each call is independent - no shared chat sessions or state.
         
         Args:
             prompt: User input text
-            conversation_history: Optional conversation context
         
         Returns:
             Generated text response
         
         Raises:
-            ValueError: Invalid API key or prompt
+            ValueError: Invalid prompt or configuration
             RuntimeError: Generation failed (network, quota, model error)
         """
+        if not prompt or not prompt.strip():
+            raise ValueError("Prompt cannot be empty")
+        
         try:
-            # Start new chat with history if provided
-            if conversation_history:
-                self.start_chat(history=conversation_history)
-            elif not self.chat_session:
-                self.start_chat()
+            # Use generate_content() for stateless generation
+            # This is safer for concurrent backend usage than chat sessions
+            # Each request is independent with no shared state
+            generation_config = genai.types.GenerationConfig(
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+            )
             
-            # Generate response
-            response = self.chat_session.send_message(prompt)
+            response = self.model.generate_content(
+                prompt,
+                generation_config=generation_config
+            )
+            
             return response.text
         
         except ValueError as e:
@@ -82,23 +94,29 @@ class GeminiClient:
             error_msg = str(e)
             logger.error(f"Gemini generation failed: {error_msg}", exc_info=True)
             
-            # Provide more specific error messages
+            # Provide specific error messages based on error type
             if "API_KEY_INVALID" in error_msg or "API key not valid" in error_msg:
                 raise RuntimeError("Gemini API key is invalid. Please check your GEMINI_API_KEY in .env file.")
-            elif "quota" in error_msg.lower() or "rate limit" in error_msg.lower():
-                raise RuntimeError("Gemini API quota exceeded or rate limited. Please try again later.")
+            elif "429" in error_msg or "quota" in error_msg.lower() or "rate limit" in error_msg.lower():
+                raise RuntimeError(f"Gemini API rate limit exceeded. Please wait a moment and try again. (Current model: {self.model_name})")
             elif "404" in error_msg or "model not found" in error_msg.lower():
-                raise RuntimeError(f"Gemini model '{self.model._model_name}' not found or not accessible.")
+                raise RuntimeError(f"Gemini model '{self.model_name}' not found. Verify model name in .env file. Available: gemini-2.5-flash, gemini-2.5-pro")
             else:
                 raise RuntimeError(f"Gemini generation failed: {error_msg}")
     
-    async def generate_async(self, prompt: str, conversation_history: Optional[List[Dict]] = None) -> str:
+    async def generate_async(self, prompt: str, temperature: float = 0.7, max_tokens: int = 150) -> str:
         """
-        Async version of generate (wraps sync call for now)
-        TODO: Use proper async implementation if available
+        Async version of generate (wraps sync call)
+        
+        Note: google.generativeai SDK doesn't have native async support yet,
+        so this is a simple wrapper for compatibility with async endpoints.
+        
+        Args:
+            prompt: User input text
+            temperature: Creativity level (0.0-2.0)
+            max_tokens: Maximum response length
+        
+        Returns:
+            Generated text response
         """
-        return self.generate(prompt, conversation_history)
-    
-    def reset_chat(self):
-        """Reset chat session"""
-        self.chat_session = None
+        return self.generate(prompt, temperature, max_tokens)

@@ -16,16 +16,16 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         start_time = time.time()
         
-        # Log request
-        logger.info(f"→ {request.method} {request.url.path}")
+        # Log request (use ASCII arrow for Windows compatibility)
+        logger.info(f"-> {request.method} {request.url.path}")
         
         # Process request
         response = await call_next(request)
         
-        # Log response
+        # Log response (use ASCII arrow for Windows compatibility)
         duration = time.time() - start_time
         logger.info(
-            f"← {request.method} {request.url.path} "
+            f"<- {request.method} {request.url.path} "
             f"status={response.status_code} duration={duration:.2f}s"
         )
         

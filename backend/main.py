@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    logger.info("👋 Shutting down LUMEN Backend...")
+    logger.info("Shutting down LUMEN Backend...")
 
 
 app = FastAPI(
@@ -93,38 +93,53 @@ app.include_router(generation.router, prefix="/api", tags=["generation"])
 
 @app.get("/")
 async def root():
-    """Health check endpoint"""
+    """Root endpoint"""
     return {
         "message": "LUMEN API is running",
         "status": "healthy",
         "version": "1.0.0",
-        "gpu_enabled": settings.GPU_ENABLED
+        "gpu_enabled": settings.GPU_ENABLED,
+        "docs": "/docs"
     }
 
 
-@app.get("/health")
+@app.get("/api/health")
 async def health_check():
     """Detailed health check"""
-    import torch
-    
     gpu_info = None
-    if settings.GPU_ENABLED and torch.cuda.is_available():
-        gpu_info = {
-            "device_name": torch.cuda.get_device_name(0),
-            "cuda_version": torch.version.cuda,
-            "memory_allocated": f"{torch.cuda.memory_allocated(0) / 1024**3:.2f} GB",
-            "memory_reserved": f"{torch.cuda.memory_reserved(0) / 1024**3:.2f} GB"
-        }
+    gpu_available = False
+    
+    try:
+        import torch
+        if settings.GPU_ENABLED and torch.cuda.is_available():
+            gpu_available = True
+            gpu_info = {
+                "device_name": torch.cuda.get_device_name(0),
+                "cuda_version": torch.version.cuda,
+                "memory_allocated": f"{torch.cuda.memory_allocated(0) / 1024**3:.2f} GB",
+                "memory_reserved": f"{torch.cuda.memory_reserved(0) / 1024**3:.2f} GB"
+            }
+    except ImportError:
+        # Torch not installed, GPU features not available
+        pass
     
     return {
         "status": "healthy",
         "version": "1.0.0",
-        "gpu_available": settings.GPU_ENABLED and torch.cuda.is_available(),
+        "gpu_available": gpu_available,
         "gpu_info": gpu_info,
         "models_path": str(settings.MODELS_PATH),
         "outputs_path": str(settings.OUTPUTS_PATH),
-        "gemini_configured": bool(settings.GEMINI_API_KEY)
+        "gemini_configured": bool(settings.GEMINI_API_KEY),
+        "gemini_model": settings.GEMINI_MODEL
     }
+
+
+# Duplicate at /health for backwards compatibility
+@app.get("/health")
+async def health_check_legacy():
+    """Legacy health check endpoint"""
+    return await health_check()
 
 
 @app.get("/api/status")

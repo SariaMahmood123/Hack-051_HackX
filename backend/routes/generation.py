@@ -29,8 +29,7 @@ router = APIRouter()
 class TextGenerationRequest(BaseModel):
     """Request for text generation via Gemini"""
     prompt: str = Field(..., description="User input text", min_length=1, max_length=2000)
-    conversation_history: Optional[List[Dict]] = Field(default=[], description="Previous messages")
-    max_tokens: Optional[int] = Field(default=1024, description="Max response length", ge=10, le=4096)
+    max_tokens: Optional[int] = Field(default=150, description="Max response length", ge=10, le=1024)
     temperature: Optional[float] = Field(default=0.7, description="Response creativity", ge=0.0, le=2.0)
     
     @validator('prompt')
@@ -92,10 +91,10 @@ class VideoGenerationResponse(BaseModel):
 class FullPipelineRequest(BaseModel):
     """Request for full text → video pipeline"""
     prompt: str = Field(..., description="User input text", min_length=1, max_length=2000)
-    conversation_history: Optional[List[Dict]] = Field(default=[])
+    max_tokens: Optional[int] = Field(default=150, description="Max response length", ge=10, le=1024)
+    temperature: Optional[float] = Field(default=0.7, ge=0.0, le=2.0)
     reference_audio: Optional[str] = None
     reference_image: Optional[str] = None
-    temperature: Optional[float] = Field(default=0.7, ge=0.0, le=2.0)
     
     @validator('prompt')
     def validate_prompt(cls, v):
@@ -295,13 +294,18 @@ async def generate_full_pipeline(request: FullPipelineRequest, background_tasks:
     logger.info(f"[{request_id}] Full pipeline started: {request.prompt[:50]}...")
     
     try:
-        # Step 1: Generate text response with Gemini
-        logger.info(f"[{request_id}] Step 1/3: Generating text...")
+        # Step 1: Generate text response with Gemini (stateless, concurrent-safe)
+        logger.info(f"[{request_id}] Step 1/3: Generating text with {settings.GEMINI_MODEL}...")
         client = GeminiClient(api_key=settings.GEMINI_API_KEY, model_name=settings.GEMINI_MODEL)
+        
+        # Use stateless generation with custom parameters
         response_text = await client.generate_async(
-            request.prompt,
-            request.conversation_history
+            prompt=request.prompt,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens
         )
+        
+        logger.info(f"[{request_id}] [OK] Text generated: {len(response_text)} chars")
         
         # Step 2: Generate audio with XTTS (GPU)
         logger.info(f"[{request_id}] Step 2/3: Synthesizing speech...")
