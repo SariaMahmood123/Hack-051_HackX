@@ -14,12 +14,13 @@ pydantic-settings==2.1.0
 google-generativeai==0.3.2
 
 # Machine Learning & Deep Learning
-torch==2.1.2
-torchvision==0.16.2
-torchaudio==2.1.2
+torch==2.2.2
+torchvision==0.17.2
+torchaudio==2.2.2
 
 # XTTS (Coqui TTS)
 TTS==0.22.0
+transformers<4.50  # TTS 0.22.0 needs transformers <4.50 for BeamSearchScorer
 
 # Audio Processing
 scipy==1.11.4

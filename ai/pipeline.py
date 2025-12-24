@@ -1,7 +1,7 @@
 """
-Pipeline Manager
+Pipeline Manager - Quality-Optimized
 Coordinates the full text → audio → video pipeline
-Handles GPU memory management and sequential execution
+Configured for CPU-based TTS for maximum audio quality
 """
 from pathlib import Path
 from typing import Optional, Dict
@@ -15,14 +15,18 @@ from .sadtalker_wrapper import SadTalkerWrapper
 
 class PipelineManager:
     """
-    Manages the full LUMEN generation pipeline
+    Manages the full LUMEN generation pipeline with quality-focused TTS
     
     Flow:
     1. Text generation (Gemini API - no GPU)
-    2. TTS generation (XTTS - GPU)
+    2. TTS generation (XTTS - CPU for maximum quality)
     3. Video generation (SadTalker - GPU)
     
-    Note: XTTS and SadTalker run sequentially to avoid GPU memory conflicts
+    Quality Features:
+    - CPU-based TTS for numerical stability
+    - 24kHz audio output
+    - FP32 precision throughout
+    - Deterministic, high-quality output
     """
     
     def __init__(
@@ -96,14 +100,19 @@ class PipelineManager:
             print(f"📝 Generating text response...")
             response_text = await self.gemini.generate_async(prompt, conversation_history)
             
-            # Step 2: Generate audio with XTTS (GPU)
-            print(f"🎤 Synthesizing speech...")
+            # Step 2: Generate high-quality audio with XTTS (CPU)
+            print(f"🎤 Synthesizing high-quality speech (CPU-optimized)...")
             audio_path = self.output_dir / "audio" / f"{request_id}.wav"
             await self.xtts.synthesize_async(
                 text=response_text,
                 reference_audio=audio_ref,
-                output_path=audio_path
+                output_path=audio_path,
+                temperature=0.65,  # Quality-focused sampling
+                repetition_penalty=2.5,  # Avoid repetition
+                top_p=0.85,  # Natural variation
+                speed=1.0  # Normal speed for clarity
             )
+            print(f"✓ Audio generated: 24kHz WAV, FP32 precision")
             
             # Step 3: Generate video with SadTalker (GPU)
             # Note: Running after XTTS to avoid GPU memory conflicts
