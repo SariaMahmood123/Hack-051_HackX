@@ -1,6 +1,5 @@
 # Python
 __pycache__/
-backend/
 *.py[cod]
 *$py.class
 *.so
@@ -71,3 +70,6 @@ Thumbs.db
 
 # Assets (optional - uncomment if assets shouldn't be tracked)
 # assets/
+
+# Backend folder
+backend/
