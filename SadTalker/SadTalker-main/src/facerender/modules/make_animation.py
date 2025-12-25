@@ -103,16 +103,31 @@ def make_animation(source_image, source_semantics, target_semantics,
                             generator, kp_detector, he_estimator, mapping, 
                             yaw_c_seq=None, pitch_c_seq=None, roll_c_seq=None,
                             use_exp=True, use_half=False):
+    # Force everything onto the generator's device to avoid silent CPU fallbacks
+    device = next(generator.parameters()).device
+    source_image = source_image.to(device)
+    source_semantics = source_semantics.to(device)
+    target_semantics = target_semantics.to(device)
+    if yaw_c_seq is not None:
+        yaw_c_seq = yaw_c_seq.to(device)
+    if pitch_c_seq is not None:
+        pitch_c_seq = pitch_c_seq.to(device)
+    if roll_c_seq is not None:
+        roll_c_seq = roll_c_seq.to(device)
+
     with torch.no_grad():
         predictions = []
 
         kp_canonical = kp_detector(source_image)
+        # Ensure kp_canonical tensors stay on GPU
+        for k, v in kp_canonical.items():
+            if isinstance(v, torch.Tensor):
+                kp_canonical[k] = v.to(device)
+
         he_source = mapping(source_semantics)
         kp_source = keypoint_transformation(kp_canonical, he_source)
     
         for frame_idx in tqdm(range(target_semantics.shape[1]), 'Face Renderer:'):
-            # still check the dimension
-            # print(target_semantics.shape, source_semantics.shape)
             target_semantics_frame = target_semantics[:, frame_idx]
             he_driving = mapping(target_semantics_frame)
             if yaw_c_seq is not None:
@@ -126,14 +141,6 @@ def make_animation(source_image, source_semantics, target_semantics,
                 
             kp_norm = kp_driving
             out = generator(source_image, kp_source=kp_source, kp_driving=kp_norm)
-            '''
-            source_image_new = out['prediction'].squeeze(1)
-            kp_canonical_new =  kp_detector(source_image_new)
-            he_source_new = he_estimator(source_image_new) 
-            kp_source_new = keypoint_transformation(kp_canonical_new, he_source_new, wo_exp=True)
-            kp_driving_new = keypoint_transformation(kp_canonical_new, he_driving, wo_exp=True)
-            out = generator(source_image_new, kp_source=kp_source_new, kp_driving=kp_driving_new)
-            '''
             predictions.append(out['prediction'])
         predictions_ts = torch.stack(predictions, dim=1)
     return predictions_ts

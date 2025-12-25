@@ -30,6 +30,10 @@ class MappingNet(nn.Module):
         self.fc_exp = nn.Linear(descriptor_nc, 3*num_kp)
 
     def forward(self, input_3dmm):
+        # Force input to model's device
+        device = next(self.parameters()).device
+        input_3dmm = input_3dmm.to(device)
+        
         out = self.first(input_3dmm)
         for i in range(self.layer):
             model = getattr(self, 'encoder' + str(i))

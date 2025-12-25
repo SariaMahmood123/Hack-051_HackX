@@ -7,12 +7,28 @@ This wrapper is configured for CPU-only operation to ensure:
 - Maximum audio quality (no GPU precision loss)
 - Deterministic output
 - Reliable generation
+
+Intent-Aware Architecture:
+- Accepts ScriptIntent with pause/emphasis markers
+- Generates audio per-segment with explicit silence
+- Returns IntentTimingMap for Motion Governor
 """
 import torch
+import numpy as np
+import soundfile as sf
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 import os
 import logging
+
+# Import intent contract
+try:
+    from ai.script_intent import ScriptIntent, IntentTimingMap, TimingSegment, flatten_segments_to_text
+    INTENT_AVAILABLE = True
+except ImportError:
+    INTENT_AVAILABLE = False
+    ScriptIntent = None
+    IntentTimingMap = None
 
 logger = logging.getLogger("lumen")
 
@@ -221,6 +237,138 @@ class XTTSWrapper:
             import traceback
             logger.error(traceback.format_exc())
             raise RuntimeError(f"High-quality TTS synthesis failed: {str(e)}")
+    
+    def synthesize_with_intent(
+        self,
+        script_intent: 'ScriptIntent',
+        reference_audio: Union[str, Path],
+        output_path: Union[str, Path],
+        language: str = "en",
+        fps: int = 25,
+        **kwargs
+    ) -> Tuple[Path, Optional['IntentTimingMap']]:
+        """
+        Intent-aware synthesis: generates audio per segment with explicit pauses.
+        
+        This is the ARCHITECTURAL method that makes intent flow through the system.
+        
+        Args:
+            script_intent: Structured script with pause/emphasis markers
+            reference_audio: Voice reference for cloning
+            output_path: Output WAV path
+            language: Language code
+            fps: Frames per second for timing map
+            **kwargs: Additional synthesis parameters
+        
+        Returns:
+            (audio_path, timing_map) tuple:
+                - audio_path: Final concatenated audio
+                - timing_map: IntentTimingMap for Motion Governor (None if not available)
+        
+        Pipeline:
+            1. Generate audio per segment
+            2. Insert explicit silence between segments
+            3. Concatenate into final audio
+            4. Build timing map linking audio time → intent
+        """
+        if not INTENT_AVAILABLE:
+            logger.warning("[XTTS] Intent system not available, falling back to plain synthesis")
+            text = " ".join(seg.text for seg in script_intent.segments)
+            return self.synthesize(text, reference_audio, output_path, language, **kwargs), None
+        
+        if not self.is_loaded:
+            self.load_model()
+        
+        reference_audio = Path(reference_audio)
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"[XTTS] Intent-aware synthesis: {len(script_intent.segments)} segments")
+        
+        try:
+            audio_segments = []
+            timing_segments = []
+            current_time = 0.0
+            
+            for idx, segment in enumerate(script_intent.segments):
+                # Shape text for emphasis (capitalization)
+                text = segment.text.strip()
+                if segment.emphasis:
+                    for word in segment.emphasis:
+                        import re
+                        pattern = re.compile(re.escape(word), re.IGNORECASE)
+                        text = pattern.sub(word.upper(), text)
+                
+                logger.info(f"[XTTS] Segment {idx+1}/{len(script_intent.segments)}: '{text[:50]}...'")
+                
+                # Generate audio for this segment (to temp file)
+                temp_path = output_path.parent / f"_temp_seg_{idx}.wav"
+                self.synthesize(
+                    text=text,
+                    reference_audio=reference_audio,
+                    output_path=temp_path,
+                    language=language,
+                    **kwargs
+                )
+                
+                # Load generated audio
+                audio_data, sr = sf.read(str(temp_path))
+                if sr != self.sample_rate:
+                    logger.warning(f"[XTTS] Sample rate mismatch: {sr} != {self.sample_rate}")
+                
+                # Record timing
+                segment_duration = len(audio_data) / sr
+                timing_segments.append(TimingSegment(
+                    segment_idx=idx,
+                    start_time=current_time,
+                    end_time=current_time + segment_duration,
+                    pause_after=segment.pause_after,
+                    emphasis=segment.emphasis,
+                    sentence_end=segment.sentence_end
+                ))
+                
+                audio_segments.append(audio_data)
+                current_time += segment_duration
+                
+                # Insert explicit silence for pauses
+                if segment.pause_after > 0.01:
+                    silence_samples = int(segment.pause_after * sr)
+                    silence = np.zeros(silence_samples, dtype=audio_data.dtype)
+                    audio_segments.append(silence)
+                    current_time += segment.pause_after
+                    logger.info(f"[XTTS] Added {segment.pause_after:.2f}s silence")
+                
+                # Clean up temp file
+                temp_path.unlink()
+            
+            # Concatenate all segments
+            final_audio = np.concatenate(audio_segments)
+            total_duration = len(final_audio) / self.sample_rate
+            
+            # Save final audio
+            sf.write(str(output_path), final_audio, self.sample_rate)
+            logger.info(f"[XTTS] ✓ Intent-aware audio: {total_duration:.2f}s, {len(timing_segments)} segments")
+            
+            # Build timing map
+            timing_map = IntentTimingMap(
+                segments=timing_segments,
+                total_duration=total_duration,
+                fps=fps
+            )
+            
+            # Update script_intent with duration
+            script_intent.total_duration = total_duration
+            
+            logger.info(f"[XTTS] ✓ Timing map built: {timing_map.num_frames} frames @ {fps}fps")
+            
+            return output_path, timing_map
+            
+        except Exception as e:
+            logger.error(f"[XTTS] Intent-aware synthesis failed: {e}", exc_info=True)
+            # Fallback to plain synthesis
+            logger.warning("[XTTS] Falling back to plain synthesis")
+            text = flatten_segments_to_text(script_intent)
+            return self.synthesize(text, reference_audio, output_path, language, **kwargs), None
     
     async def synthesize_async(
         self, 

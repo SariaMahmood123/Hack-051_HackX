@@ -27,6 +27,7 @@ wheels/
 .env
 .env.local
 .venv
+.venv-wsl
 
 # IDEs
 .vscode/

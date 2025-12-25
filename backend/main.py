@@ -42,6 +42,13 @@ async def lifespan(app: FastAPI):
     cleanup_old_files(settings.OUTPUTS_PATH / "audio", max_age_hours=24)
     cleanup_old_files(settings.OUTPUTS_PATH / "video", max_age_hours=24)
     
+    # Log all registered routes for debugging (PRODUCTION-CRITICAL FIX)
+    logger.info("Registered routes:")
+    for route in app.routes:
+        if hasattr(route, 'methods') and hasattr(route, 'path'):
+            methods = ', '.join(route.methods)
+            logger.info(f"   {methods:8} {route.path}")
+    
     yield
     
     logger.info("Shutting down LUMEN Backend...")

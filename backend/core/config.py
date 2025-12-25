@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     
     # Gemini API
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.0-flash-exp"
+    GEMINI_MODEL: str = "gemini-2.0-flash-lite-001"
     
     # Paths
     PROJECT_ROOT: Path = Path(__file__).parent.parent.parent

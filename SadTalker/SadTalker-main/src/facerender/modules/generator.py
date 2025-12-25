@@ -68,6 +68,10 @@ class OcclusionAwareGenerator(nn.Module):
         return F.grid_sample(inp, deformation)
 
     def forward(self, source_image, kp_driving, kp_source):
+        # Force inputs to model's device to prevent CPU fallback
+        device = next(self.parameters()).device
+        source_image = source_image.to(device)
+        
         # Encoding (downsampling) part
         out = self.first(source_image)
         for i in range(len(self.down_blocks)):
@@ -208,6 +212,10 @@ class OcclusionAwareSPADEGenerator(nn.Module):
         return F.grid_sample(inp, deformation)
 
     def forward(self, source_image, kp_driving, kp_source):
+        # Force inputs to model's device to prevent CPU fallback
+        device = next(self.parameters()).device
+        source_image = source_image.to(device)
+        
         # Encoding (downsampling) part
         out = self.first(source_image)
         for i in range(len(self.down_blocks)):
