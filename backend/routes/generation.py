@@ -17,8 +17,8 @@ from ..core.utils import generate_cache_key, ensure_file_exists
 # Import AI model wrappers
 from ai.gemini_client import GeminiClient
 from ai.xtts_wrapper import XTTSWrapper
-# TODO: Import these once implemented
-# from ai.sadtalker_wrapper import SadTalkerWrapper
+from ai.sadtalker_wrapper import SadTalkerWrapper
+# TODO: Import pipeline manager once implemented
 # from ai.pipeline import PipelineManager
 
 logger = logging.getLogger("lumen")
@@ -272,27 +272,30 @@ async def generate_video(request: VideoGenerationRequest):
         # Use reference image or default
         reference_image = request.reference_image or str(settings.SADTALKER_REFERENCE_IMAGE)
         
-        # TODO: Implement SadTalker integration
-        # sadtalker = SadTalkerWrapper()
-        # output_path = settings.OUTPUTS_PATH / "video" / f"{request_id}.mp4"
-        # video_path = await sadtalker.generate_async(
-        #     audio_path=Path(request.audio_path),
-        #     reference_image=Path(reference_image),
-        #     output_path=output_path,
-        #     fps=request.fps,
-        #     enhancer="gfpgan" if request.enhance else None
-        # )
+        # Generate video with SadTalker
+        sadtalker = SadTalkerWrapper()
+        output_path = settings.OUTPUTS_PATH / "video" / f"{request_id}.mp4"
+        video_path = await sadtalker.generate_async(
+            audio_path=Path(request.audio_path),
+            reference_image=Path(reference_image),
+            output_path=output_path,
+            fps=request.fps,
+            enhancer="gfpgan" if request.enhance else None
+        )
         
-        # Placeholder response
-        video_filename = f"{request_id}.mp4"
-        video_path = f"outputs/video/{video_filename}"
+        # Calculate video duration from audio
+        import wave
+        with wave.open(request.audio_path, 'rb') as audio_file:
+            frames = audio_file.getnframes()
+            rate = audio_file.getframerate()
+            duration = frames / float(rate)
         
-        logger.info(f"[{request_id}] Video generation complete: {video_path}")
+        logger.info(f"[{request_id}] Video generation complete: {video_path.name} ({duration:.1f}s)")
         
         return VideoGenerationResponse(
-            video_path=video_path,
-            video_url=get_output_url(video_path),
-            duration=5.0,  # Placeholder
+            video_path=str(video_path),
+            video_url=get_output_url(str(video_path)),
+            duration=duration,
             request_id=request_id,
             fps=request.fps
         )

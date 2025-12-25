@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     
     # SadTalker Configuration
     SADTALKER_MODEL_PATH: Path = MODELS_PATH / "sadtalker"
-    SADTALKER_REFERENCE_IMAGE: Path = ASSETS_PATH / "avatar.jpg"
+    SADTALKER_REFERENCE_IMAGE: Path = ASSETS_PATH / "mkbhd.jpg"  # MKBHD portrait for video generation
     
     # GPU Configuration
     GPU_ENABLED: bool = True
