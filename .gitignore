@@ -26,6 +26,7 @@ wheels/
 # Environment
 .env
 .env.local
+.env.example
 .venv
 .venv-wsl
 
@@ -70,6 +71,3 @@ Thumbs.db
 
 # Assets (optional - uncomment if assets shouldn't be tracked)
 # assets/
-
-# Backend folder
-backend/
